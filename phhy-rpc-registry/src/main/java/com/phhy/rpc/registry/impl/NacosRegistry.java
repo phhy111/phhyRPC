@@ -1,0 +1,102 @@
+package com.phhy.rpc.registry.impl;
+
+import com.alibaba.nacos.api.exception.NacosException;
+import com.alibaba.nacos.api.naming.NamingFactory;
+import com.alibaba.nacos.api.naming.NamingService;
+import com.alibaba.nacos.api.naming.pojo.Instance;
+import com.phhy.rpc.common.enums.HealthStatus;
+import com.phhy.rpc.common.model.ServiceInstance;
+import com.phhy.rpc.registry.api.ServiceRegistry;
+import lombok.extern.slf4j.Slf4j;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Slf4j
+public class NacosRegistry implements ServiceRegistry {
+
+    private final NamingService namingService;
+
+    public NacosRegistry(String serverAddr) {
+        try {
+            this.namingService = NamingFactory.createNamingService(serverAddr);
+        } catch (NacosException e) {
+            throw new RuntimeException("Failed to create Nacos NamingService", e);
+        }
+    }
+
+    @Override
+    public void register(ServiceInstance instance) {
+        try {
+            Instance nacosInstance = new Instance();
+            nacosInstance.setIp(instance.getHost());
+            nacosInstance.setPort(instance.getPort());
+            nacosInstance.setWeight(instance.getWeight());
+            nacosInstance.setHealthy(true);
+
+            // 构建元数据
+            Map<String, String> metadata = new HashMap<>();
+            if (instance.getMetadata() != null) {
+                metadata.putAll(instance.getMetadata());
+            }
+            metadata.put("healthStatus", HealthStatus.UP.name());
+            metadata.putIfAbsent("serializeType", "JSON");
+            metadata.putIfAbsent("protocolVersion", "1");
+            metadata.putIfAbsent("rpcPort", String.valueOf(instance.getPort()));
+            metadata.put("lastHeartbeat", String.valueOf(System.currentTimeMillis()));
+            nacosInstance.setMetadata(metadata);
+
+            namingService.registerInstance(instance.getServiceName(), nacosInstance);
+            log.info("Registered service: {} at {}:{}", instance.getServiceName(), instance.getHost(), instance.getPort());
+        } catch (NacosException e) {
+            log.error("Failed to register service: {}", instance.getServiceName(), e);
+            throw new RuntimeException("Failed to register service", e);
+        }
+    }
+
+    @Override
+    public void deregister(ServiceInstance instance) {
+        try {
+            namingService.deregisterInstance(instance.getServiceName(), instance.getHost(), instance.getPort());
+            log.info("Deregistered service: {} at {}:{}", instance.getServiceName(), instance.getHost(), instance.getPort());
+        } catch (NacosException e) {
+            log.error("Failed to deregister service: {}", instance.getServiceName(), e);
+            throw new RuntimeException("Failed to deregister service", e);
+        }
+    }
+
+    @Override
+    public void updateHealthStatus(ServiceInstance instance, HealthStatus status) {
+        try {
+            // 通过getAllInstances查询当前实例获取完整元数据
+            java.util.List<Instance> allInstances = namingService.getAllInstances(instance.getServiceName());
+            Instance targetInstance = null;
+            for (Instance inst : allInstances) {
+                if (inst.getIp().equals(instance.getHost()) && inst.getPort() == instance.getPort()) {
+                    targetInstance = inst;
+                    break;
+                }
+            }
+            if (targetInstance == null) {
+                log.warn("Instance not found for health update: {}:{}", instance.getHost(), instance.getPort());
+                return;
+            }
+            Map<String, String> metadata = new HashMap<>(targetInstance.getMetadata());
+            metadata.put("healthStatus", status.name());
+            metadata.put("lastHeartbeat", String.valueOf(System.currentTimeMillis()));
+            targetInstance.setMetadata(metadata);
+
+            // 先注销再重新注册以更新元数据
+            namingService.deregisterInstance(instance.getServiceName(), targetInstance);
+            targetInstance.setHealthy(status == HealthStatus.UP);
+            namingService.registerInstance(instance.getServiceName(), targetInstance);
+            log.info("Updated health status of {}:{} to {}", instance.getHost(), instance.getPort(), status);
+        } catch (NacosException e) {
+            log.error("Failed to update health status for {}:{}", instance.getHost(), instance.getPort(), e);
+        }
+    }
+
+    public NamingService getNamingService() {
+        return namingService;
+    }
+}
