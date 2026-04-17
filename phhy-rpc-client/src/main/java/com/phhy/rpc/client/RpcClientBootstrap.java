@@ -76,12 +76,14 @@ public class RpcClientBootstrap {
 
         // 创建并启动心跳管理
         heartbeatManager = new ClientHeartbeatManager(nettyRpcClient.getChannelManager(), serializeType);
+        heartbeatManager.setNettyRpcClient(nettyRpcClient);
+        nettyRpcClient.setHeartbeatManager(heartbeatManager);
         heartbeatManager.start();
 
         // 添加默认日志Filter
         filterChain.addFilter(new LogFilter());
 
-        log.info("RPC Client bootstrap completed");
+        log.info("RPC 客户端引导完成");
     }
 
     // 为服务接口创建代理对象
@@ -97,7 +99,7 @@ public class RpcClientBootstrap {
     }
 
     public void shutdown() {
-        log.info("Shutting down RPC Client...");
+        log.info("正在关闭 RPC 客户端...");
         if (heartbeatManager != null) {
             heartbeatManager.shutdown();
         }
@@ -107,6 +109,6 @@ public class RpcClientBootstrap {
         if (serviceCacheManager != null) {
             serviceCacheManager.shutdown();
         }
-        log.info("RPC Client shut down");
+        log.info("RPC 客户端已关闭");
     }
 }

@@ -31,7 +31,7 @@ public class ServiceCacheManager {
         this.cacheExpireMillis = cacheExpireMillis;
         this.refreshIntervalMillis = refreshIntervalMillis;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "service-cache-refresh");
+            Thread t = new Thread(r, "服务缓存刷新");
             t.setDaemon(true);
             return t;
         });
@@ -51,7 +51,7 @@ public class ServiceCacheManager {
                 cacheExpireTime.put(serviceName, now + cacheExpireMillis);
                 return instances;
             } catch (Exception e) {
-                log.warn("Failed to fetch instances for {}, using cached data", serviceName, e);
+                log.warn("获取实例失败 {}, 使用缓存数据", serviceName, e);
                 // Nacos不可用时，降级使用本地缓存
                 List<ServiceInstance> cached = serviceCache.get(serviceName);
                 if (cached != null) {
@@ -70,7 +70,7 @@ public class ServiceCacheManager {
             serviceCache.put(serviceName, instances);
             cacheExpireTime.put(serviceName, System.currentTimeMillis() + cacheExpireMillis);
         } catch (Exception e) {
-            log.warn("Force refresh failed for service: {}", serviceName, e);
+            log.warn("强制刷新服务失败： {}", serviceName, e);
         }
     }
 
@@ -81,7 +81,7 @@ public class ServiceCacheManager {
                 serviceCache.put(serviceName, instances);
                 cacheExpireTime.put(serviceName, System.currentTimeMillis() + cacheExpireMillis);
             } catch (Exception e) {
-                log.warn("Refresh failed for service: {}, keeping cached data", serviceName, e);
+                log.warn("刷新服务失败： {}, 保持缓存数据", serviceName, e);
             }
         }
     }

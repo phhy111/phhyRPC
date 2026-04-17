@@ -13,7 +13,7 @@ public class ExampleServer {
                 .publishService(HelloService.class, new HelloServiceImpl())
                 .start();
 
-        System.out.println("RPC Server started on port 8080, press Ctrl+C to shutdown.");
+        System.out.println("RPC 服务器已在端口 8080 启动，按 Ctrl C 关闭。");
         Thread.currentThread().join();
     }
 }

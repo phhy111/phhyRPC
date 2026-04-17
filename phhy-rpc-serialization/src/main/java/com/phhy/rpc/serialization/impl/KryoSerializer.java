@@ -53,8 +53,8 @@ public class KryoSerializer implements Serializer {
             kryo.writeClassAndObject(output, obj);
             return output.toBytes();
         } catch (Exception e) {
-            log.error("Kryo serialize error", e);
-            throw new RuntimeException("Kryo serialize error", e);
+            log.error("Kryo 序列化错误", e);
+            throw new RuntimeException("Kryo 序列化错误", e);
         } finally {
             output.reset();
             kryoPool.free(kryo);
@@ -74,8 +74,8 @@ public class KryoSerializer implements Serializer {
             Object obj = kryo.readClassAndObject(input);
             return clazz.cast(obj);
         } catch (Exception e) {
-            log.error("Kryo deserialize error", e);
-            throw new RuntimeException("Kryo deserialize error", e);
+            log.error("Kryo 反序列化错误", e);
+            throw new RuntimeException("Kryo 反序列化错误", e);
         } finally {
             input.setBuffer(null);
             kryoPool.free(kryo);

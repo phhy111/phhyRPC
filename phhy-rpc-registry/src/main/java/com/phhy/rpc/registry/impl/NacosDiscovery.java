@@ -23,7 +23,7 @@ public class NacosDiscovery implements ServiceDiscovery {
         try {
             this.namingService = NamingFactory.createNamingService(serverAddr);
         } catch (NacosException e) {
-            throw new RuntimeException("Failed to create Nacos NamingService", e);
+            throw new RuntimeException("创建 Nacos NamingService 失败", e);
         }
     }
 
@@ -60,11 +60,11 @@ public class NacosDiscovery implements ServiceDiscovery {
                 healthyInstances.add(serviceInstance);
             }
 
-            log.debug("Found {} healthy instances for service: {}", healthyInstances.size(), serviceName);
+            log.debug("为服务找到 {} 个健康实例：{}", healthyInstances.size(), serviceName);
             return healthyInstances;
         } catch (NacosException e) {
-            log.error("Failed to get instances for service: {}", serviceName, e);
-            throw new RuntimeException("Failed to get instances from Nacos", e);
+            log.error("获取服务实例失败：{}", serviceName, e);
+            throw new RuntimeException("无法从 Nacos 获取实例", e);
         }
     }
 

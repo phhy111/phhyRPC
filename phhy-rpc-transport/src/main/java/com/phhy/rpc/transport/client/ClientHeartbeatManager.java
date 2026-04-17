@@ -5,6 +5,8 @@ import com.phhy.rpc.common.enums.MsgType;
 import com.phhy.rpc.common.enums.SerializeType;
 import com.phhy.rpc.protocol.model.RpcMessage;
 import io.netty.channel.Channel;
+import io.netty.handler.codec.http2.Http2StreamChannel;
+import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
@@ -16,15 +18,13 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class ClientHeartbeatManager {
 
-    // 每个服务端key对应一个最后心跳响应时间戳
     private final Map<String, Long> lastHeartbeatTime = new ConcurrentHashMap<>();
     private final ChannelManager channelManager;
     private final SerializeType serializeType;
     private final ScheduledExecutorService scheduler;
+    private NettyRpcClient nettyRpcClient;
 
-    // 心跳发送间隔（默认30秒）
     private static final long HEARTBEAT_INTERVAL = 30_000L;
-    // 心跳超时阈值（默认60秒）
     private static final long HEARTBEAT_TIMEOUT = 60_000L;
 
     public ClientHeartbeatManager(ChannelManager channelManager, SerializeType serializeType) {
@@ -37,19 +37,21 @@ public class ClientHeartbeatManager {
         });
     }
 
+    public void setNettyRpcClient(NettyRpcClient nettyRpcClient) {
+        this.nettyRpcClient = nettyRpcClient;
+    }
+
     public void start() {
-        // 定时发送心跳
         scheduler.scheduleAtFixedRate(this::sendHeartbeats, HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL, TimeUnit.MILLISECONDS);
-        // 定时检测超时
         scheduler.scheduleAtFixedRate(this::checkTimeouts, HEARTBEAT_TIMEOUT, HEARTBEAT_INTERVAL, TimeUnit.MILLISECONDS);
-        log.info("Client heartbeat manager started");
+        log.info("客户端心跳管理器已启动");
     }
 
     private void sendHeartbeats() {
         for (Map.Entry<String, Long> entry : lastHeartbeatTime.entrySet()) {
             String key = entry.getKey();
             Channel channel = channelManager.getChannel(key);
-            if (channel != null && channel.isActive()) {
+            if (channel != null && channel.isActive() && nettyRpcClient != null) {
                 RpcMessage heartbeatMsg = RpcMessage.builder()
                         .version(RpcConstant.VERSION)
                         .msgType(MsgType.HEARTBEAT_REQ)
@@ -57,11 +59,21 @@ public class ClientHeartbeatManager {
                         .requestId(System.currentTimeMillis())
                         .body(null)
                         .build();
-                channel.writeAndFlush(heartbeatMsg).addListener(future -> {
-                    if (!future.isSuccess()) {
-                        log.warn("Failed to send heartbeat to {}", key);
-                    }
-                });
+
+                nettyRpcClient.createStreamBootstrap(channel).open()
+                        .addListener((GenericFutureListener<io.netty.util.concurrent.Future<Http2StreamChannel>>) streamFuture -> {
+                            if (streamFuture.isSuccess()) {
+                                Http2StreamChannel streamChannel = streamFuture.getNow();
+                                nettyRpcClient.ensureStreamPipeline(streamChannel);
+                                nettyRpcClient.writeRpcMessage(streamChannel, heartbeatMsg).addListener(future -> {
+                                    if (!future.isSuccess()) {
+                                        log.warn("发送心跳失败到 {}", key);
+                                    }
+                                });
+                            } else {
+                                log.warn("创建心跳流通道失败到 {}: {}", key, streamFuture.cause().getMessage());
+                            }
+                        });
             }
         }
     }
@@ -71,10 +83,8 @@ public class ClientHeartbeatManager {
         for (Map.Entry<String, Long> entry : lastHeartbeatTime.entrySet()) {
             String key = entry.getKey();
             long lastTime = entry.getValue();
-            // 超过60秒未收到响应则判定为超时
             if (now - lastTime > HEARTBEAT_TIMEOUT) {
-                log.warn("Heartbeat timeout for {}, marking as fault", key);
-                // 故障转移：标记该通道为故障，从心跳列表中移除
+                log.warn("心跳 {}, 超时标记为故障", key);
                 channelManager.markFault(key);
                 lastHeartbeatTime.remove(key);
             }
@@ -89,7 +99,6 @@ public class ClientHeartbeatManager {
         lastHeartbeatTime.remove(key);
     }
 
-    // 收到HEARTBEAT_RESP时更新最后心跳响应时间戳
     public void onHeartbeatResponse(String key) {
         lastHeartbeatTime.put(key, System.currentTimeMillis());
     }

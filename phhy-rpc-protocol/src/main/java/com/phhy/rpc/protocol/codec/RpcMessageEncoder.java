@@ -15,7 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RpcMessageEncoder extends MessageToByteEncoder<RpcMessage> {
 
     @Override
-    protected void encode(ChannelHandlerContext ctx, RpcMessage msg, ByteBuf out) throws Exception {
+    public void encode(ChannelHandlerContext ctx, RpcMessage msg, ByteBuf out) throws Exception {
         // 写入魔数 4B
         out.writeBytes(RpcConstant.MAGIC);
         // 写入版本号 1B
@@ -40,7 +40,7 @@ public class RpcMessageEncoder extends MessageToByteEncoder<RpcMessage> {
             out.writeBytes(bodyBytes);
         }
 
-        log.debug("Encoded RpcMessage: type={}, serializeType={}, requestId={}, bodyLen={}",
+        log.debug("已编码的 RpcMessage：type={}, serializeType={}, requestId={}, bodyLen={}",
                 msg.getMsgType(), msg.getSerializeType(), msg.getRequestId(), bodyBytes.length);
     }
 }

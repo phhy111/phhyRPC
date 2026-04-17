@@ -35,7 +35,7 @@ public class RpcMessageDecoder extends ByteToMessageDecoder {
         in.readBytes(magic);
         if (!Arrays.equals(magic, RpcConstant.MAGIC)) {
             in.resetReaderIndex();
-            throw new RpcException("Invalid magic number: " + Arrays.toString(magic));
+            throw new RpcException("无效的魔术数字： " + Arrays.toString(magic));
         }
 
         // 读取版本号
@@ -87,7 +87,7 @@ public class RpcMessageDecoder extends ByteToMessageDecoder {
 
         out.add(rpcMessage);
 
-        log.debug("Decoded RpcMessage: type={}, serializeType={}, requestId={}, bodyLen={}",
+        log.debug("已解码的 RpcMessage: type={}, serializeType={}, requestId={}, bodyLen={}",
                 msgType, serializeType, requestId, bodyLen);
     }
 }

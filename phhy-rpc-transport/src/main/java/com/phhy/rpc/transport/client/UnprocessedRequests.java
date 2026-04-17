@@ -25,7 +25,7 @@ public class UnprocessedRequests {
         if (future != null) {
             future.complete(response);
         } else {
-            log.warn("No pending request found for requestId: {}", requestId);
+            log.warn("未找到 requestId 的待处理请求： {}", requestId);
         }
     }
 
@@ -35,7 +35,7 @@ public class UnprocessedRequests {
             entry.getValue().completeExceptionally(cause);
         }
         pendingRequests.clear();
-        log.warn("All pending requests completed exceptionally: {}", cause.getMessage());
+        log.warn("所有待处理的请求异常完成：{}", cause.getMessage());
     }
 
     public int size() {

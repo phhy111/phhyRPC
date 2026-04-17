@@ -29,7 +29,7 @@ public class ChannelManager {
     public void putChannel(String key, Channel channel) {
         channelCache.put(key, channel);
         faultMarkers.remove(key);
-        log.info("Channel cached for key: {}", key);
+        log.info("通道已为键缓存: {}", key);
     }
 
     public void markFault(String key) {
@@ -38,7 +38,7 @@ public class ChannelManager {
         if (channel != null && channel.isActive()) {
             channel.close();
         }
-        log.warn("Channel marked as fault for key: {}", key);
+        log.warn("通道标记为键的故障：{}", key);
     }
 
     public boolean isFault(String key) {

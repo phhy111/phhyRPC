@@ -76,7 +76,7 @@ public class RpcClientProxy implements InvocationHandler {
         // 通过ServiceCacheManager从Nacos（本地缓存）获取该服务的健康实例列表
         List<ServiceInstance> instances = serviceCacheManager.getInstances(interfaceClass.getName());
         if (instances == null || instances.isEmpty()) {
-            throw new RpcException("No healthy instances available for service: " + interfaceClass.getName());
+            throw new RpcException("没有可用的健康实例用于服务：" + interfaceClass.getName());
         }
 
         // 通过LoadBalancer轮询选择一个服务实例

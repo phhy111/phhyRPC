@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Slf4j
+//服务端启动引导类，负责把所有组件组装在一起并管理完整生命周期
 public class RpcServerBootstrap {
 
     private int port = 8080;
@@ -82,13 +83,13 @@ public class RpcServerBootstrap {
         }
 
         // 注册JVM ShutdownHook实现优雅停机
-        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "rpc-server-shutdown"));
+        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "RPC 服务器关闭"));
 
-        log.info("RPC Server bootstrap completed, published {} services", serviceRegistry.size());
+        log.info("RPC 服务器启动完成，已发布 {} 服务", serviceRegistry.size());
     }
 
     public void shutdown() {
-        log.info("Shutting down RPC Server...");
+        log.info("正在关闭 RPC 服务器...");
 
         // 按顺序执行：停止健康检查 → 从Nacos注销服务 → 关闭Netty Server
         if (healthChecker != null) {
@@ -111,6 +112,6 @@ public class RpcServerBootstrap {
             nettyRpcServer.shutdown();
         }
 
-        log.info("RPC Server shut down gracefully");
+        log.info("RPC 服务器已正常关闭");
     }
 }

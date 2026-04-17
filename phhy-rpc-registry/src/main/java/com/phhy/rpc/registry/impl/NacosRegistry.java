@@ -21,7 +21,7 @@ public class NacosRegistry implements ServiceRegistry {
         try {
             this.namingService = NamingFactory.createNamingService(serverAddr);
         } catch (NacosException e) {
-            throw new RuntimeException("Failed to create Nacos NamingService", e);
+            throw new RuntimeException("创建 Nacos NamingService 失败", e);
         }
     }
 
@@ -47,10 +47,10 @@ public class NacosRegistry implements ServiceRegistry {
             nacosInstance.setMetadata(metadata);
 
             namingService.registerInstance(instance.getServiceName(), nacosInstance);
-            log.info("Registered service: {} at {}:{}", instance.getServiceName(), instance.getHost(), instance.getPort());
+            log.info("注册服务: {} at {}:{}", instance.getServiceName(), instance.getHost(), instance.getPort());
         } catch (NacosException e) {
-            log.error("Failed to register service: {}", instance.getServiceName(), e);
-            throw new RuntimeException("Failed to register service", e);
+            log.error("注册服务失败： {}", instance.getServiceName(), e);
+            throw new RuntimeException("注册服务失败", e);
         }
     }
 
@@ -58,10 +58,10 @@ public class NacosRegistry implements ServiceRegistry {
     public void deregister(ServiceInstance instance) {
         try {
             namingService.deregisterInstance(instance.getServiceName(), instance.getHost(), instance.getPort());
-            log.info("Deregistered service: {} at {}:{}", instance.getServiceName(), instance.getHost(), instance.getPort());
+            log.info("已注销的服务： {} at {}:{}", instance.getServiceName(), instance.getHost(), instance.getPort());
         } catch (NacosException e) {
-            log.error("Failed to deregister service: {}", instance.getServiceName(), e);
-            throw new RuntimeException("Failed to deregister service", e);
+            log.error("注销服务失败： {}", instance.getServiceName(), e);
+            throw new RuntimeException("注销服务失败：", e);
         }
     }
 
@@ -78,7 +78,7 @@ public class NacosRegistry implements ServiceRegistry {
                 }
             }
             if (targetInstance == null) {
-                log.warn("Instance not found for health update: {}:{}", instance.getHost(), instance.getPort());
+                log.warn("未找到健康更新的实例： {}:{}", instance.getHost(), instance.getPort());
                 return;
             }
             Map<String, String> metadata = new HashMap<>(targetInstance.getMetadata());
@@ -90,9 +90,9 @@ public class NacosRegistry implements ServiceRegistry {
             namingService.deregisterInstance(instance.getServiceName(), targetInstance);
             targetInstance.setHealthy(status == HealthStatus.UP);
             namingService.registerInstance(instance.getServiceName(), targetInstance);
-            log.info("Updated health status of {}:{} to {}", instance.getHost(), instance.getPort(), status);
+            log.info("更新的健康状况 {}:{} to {}", instance.getHost(), instance.getPort(), status);
         } catch (NacosException e) {
-            log.error("Failed to update health status for {}:{}", instance.getHost(), instance.getPort(), e);
+            log.error("无法更新健康状态{}:{}", instance.getHost(), instance.getPort(), e);
         }
     }
 

@@ -27,8 +27,8 @@ public class JsonSerializer implements Serializer {
         try {
             return objectMapper.writeValueAsBytes(obj);
         } catch (Exception e) {
-            log.error("JSON serialize error", e);
-            throw new RuntimeException("JSON serialize error", e);
+            log.error("JSON 序列化错误", e);
+            throw new RuntimeException("JSON 序列化错误", e);
         }
     }
 
@@ -40,8 +40,8 @@ public class JsonSerializer implements Serializer {
         try {
             return objectMapper.readValue(bytes, clazz);
         } catch (Exception e) {
-            log.error("JSON deserialize error", e);
-            throw new RuntimeException("JSON deserialize error", e);
+            log.error("JSON 反序列化错误", e);
+            throw new RuntimeException("JSON 反序列化错误", e);
         }
     }
 }

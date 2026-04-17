@@ -21,7 +21,7 @@ public class FilterChain {
             try {
                 filter.doFilterBefore(request);
             } catch (Exception e) {
-                log.warn("Filter before error: {}", filter.getClass().getSimpleName(), e);
+                log.warn("错误前的过滤： {}", filter.getClass().getSimpleName(), e);
             }
         }
     }
@@ -31,7 +31,7 @@ public class FilterChain {
             try {
                 filter.doFilterAfter(request, response);
             } catch (Exception e) {
-                log.warn("Filter after error: {}", filter.getClass().getSimpleName(), e);
+                log.warn("错误后过滤： {}", filter.getClass().getSimpleName(), e);
             }
         }
     }

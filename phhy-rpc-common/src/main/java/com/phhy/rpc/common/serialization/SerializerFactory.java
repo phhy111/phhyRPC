@@ -24,10 +24,10 @@ public final class SerializerFactory {
                         return (Serializer) Class.forName("com.phhy.rpc.serialization.impl.KryoSerializer")
                                 .getDeclaredConstructor().newInstance();
                     default:
-                        throw new IllegalArgumentException("Unsupported serialize type: " + t);
+                        throw new IllegalArgumentException("不支持的序列化类型：" + t);
                 }
             } catch (Exception e) {
-                throw new RuntimeException("Failed to create serializer for type: " + t, e);
+                throw new RuntimeException("无法为类型创建序列化器：" + t, e);
             }
         });
     }

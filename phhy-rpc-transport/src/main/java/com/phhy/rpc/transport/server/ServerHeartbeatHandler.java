@@ -25,7 +25,7 @@ public class ServerHeartbeatHandler extends IdleStateHandler {
     protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception {
         if (evt == IdleStateEvent.READER_IDLE_STATE_EVENT) {
             // 超过60秒未收到客户端任何数据，触发READER_IDLE事件
-            log.warn("Client idle timeout, closing connection: {}", ctx.channel().remoteAddress());
+            log.warn("客户端空闲超时，正在关闭连接： {}", ctx.channel().remoteAddress());
             // 标记客户端离线，关闭该客户端连接
             ctx.close();
         }

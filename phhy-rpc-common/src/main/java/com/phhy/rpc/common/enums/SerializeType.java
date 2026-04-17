@@ -21,6 +21,6 @@ public enum SerializeType {
                 return type;
             }
         }
-        throw new IllegalArgumentException("Unknown serialize type code: " + code);
+        throw new IllegalArgumentException("未知的序列化类型代码： " + code);
     }
 }

@@ -14,17 +14,18 @@ import java.util.Map;
 import java.util.concurrent.*;
 
 @Slf4j
+//服务端健康检查器
 public class ServerHealthChecker {
 
-    private final ServiceRegistry serviceRegistry;
-    private final ServiceInstance serviceInstance;
-    private final ScheduledExecutorService scheduler;
+    private final ServiceRegistry serviceRegistry;// 服务注册中心
+    private final ServiceInstance serviceInstance;//当前实例
+    private final ScheduledExecutorService scheduler;//定时任务调度
 
-    // JVM内存使用率阈值
+    // JVM内存使用率阈值，超过不健康
     private static final double MEMORY_THRESHOLD = 0.9;
-    // 线程池队列积压率阈值
+    // 线程池队列积压率阈值，超过不健康
     private static final double QUEUE_THRESHOLD = 0.8;
-    // 检查间隔（默认15秒）
+    // 检查间隔（默认15秒），检测一次
     private static final long CHECK_INTERVAL = 15_000L;
 
     private volatile HealthStatus currentStatus = HealthStatus.UP;
@@ -34,7 +35,7 @@ public class ServerHealthChecker {
         this.serviceRegistry = serviceRegistry;
         this.serviceInstance = serviceInstance;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "server-health-checker");
+            Thread t = new Thread(r, "服务器健康检查器");
             t.setDaemon(true);
             return t;
         });
@@ -46,7 +47,7 @@ public class ServerHealthChecker {
 
     public void start() {
         scheduler.scheduleAtFixedRate(this::check, CHECK_INTERVAL, CHECK_INTERVAL, TimeUnit.MILLISECONDS);
-        log.info("Server health checker started");
+        log.info("服务器健康检查器已启动");
     }
 
     private void check() {
@@ -58,7 +59,7 @@ public class ServerHealthChecker {
             MemoryUsage heapUsage = memoryMXBean.getHeapMemoryUsage();
             double memoryUsage = (double) heapUsage.getUsed() / heapUsage.getMax();
             if (memoryUsage > MEMORY_THRESHOLD) {
-                log.warn("JVM memory usage too high: {}%", String.format("%.2f", memoryUsage * 100));
+                log.warn("JVM 内存使用过高：{}%", String.format("%.2f", memoryUsage * 100));
                 healthy = false;
             }
 
@@ -69,7 +70,7 @@ public class ServerHealthChecker {
                 if (maxQueueSize > 0) {
                     double queueUsage = (double) queueSize / maxQueueSize;
                     if (queueUsage > QUEUE_THRESHOLD) {
-                        log.warn("Thread pool queue usage too high: {}%", String.format("%.2f", queueUsage * 100));
+                        log.warn("线程池队列使用过高： {}%", String.format("%.2f", queueUsage * 100));
                         healthy = false;
                     }
                 }
@@ -81,10 +82,10 @@ public class ServerHealthChecker {
                 currentStatus = newStatus;
                 // 检查结果同步至Nacos
                 serviceRegistry.updateHealthStatus(serviceInstance, currentStatus);
-                log.info("Health status changed to: {}", currentStatus);
+                log.info("健康状态已更改为： {}", currentStatus);
             }
         } catch (Exception e) {
-            log.error("Health check error", e);
+            log.error("健康检查错误", e);
         }
     }
 

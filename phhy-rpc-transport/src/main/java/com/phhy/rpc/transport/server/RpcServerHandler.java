@@ -41,7 +41,7 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
                     .body(null)
                     .build();
             ctx.writeAndFlush(heartbeatResp);
-            log.debug("Received heartbeat from client, responded");
+            log.debug("已收到来自客户端的心跳，并已响应");
             return;
         }
 
@@ -60,7 +60,7 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
             // 从服务注册表中查找实现对象
             Object service = serviceRegistry.get(request.getInterfaceName());
             if (service == null) {
-                throw new RpcException("Service not found: " + request.getInterfaceName());
+                throw new RpcException("未找到服务： " + request.getInterfaceName());
             }
 
             // 反射调用目标方法
@@ -74,11 +74,11 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
         } catch (java.lang.reflect.InvocationTargetException e) {
             // 捕获InvocationTargetException，提取原始异常
             Throwable targetException = e.getTargetException();
-            log.error("Service invocation failed: {}.{}", request.getInterfaceName(), request.getMethodName(), targetException);
+            log.error("服务调用失败： {}.{}", request.getInterfaceName(), request.getMethodName(), targetException);
             RpcResponse response = RpcResponse.fail(requestId, targetException);
             sendResponse(ctx, requestId, serializeType, response);
         } catch (Exception e) {
-            log.error("Service invocation error: {}.{}", request.getInterfaceName(), request.getMethodName(), e);
+            log.error("服务调用失败： {}.{}", request.getInterfaceName(), request.getMethodName(), e);
             RpcResponse response = RpcResponse.fail(requestId, e);
             sendResponse(ctx, requestId, serializeType, response);
         }
@@ -97,7 +97,7 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        log.error("Server handler exception", cause);
+        log.error("服务器处理程序异常", cause);
         ctx.close();
     }
 }

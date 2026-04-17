@@ -16,13 +16,13 @@ public class RoundRobinBalancer implements LoadBalancer {
     @Override
     public ServiceInstance select(List<ServiceInstance> instances) {
         if (instances == null || instances.isEmpty()) {
-            throw new IllegalArgumentException("Instance list is empty");
+            throw new IllegalArgumentException("实例列表为空");
         }
 
         // 通过getAndIncrement()获取当前值并对实例列表取模
         int index = Math.abs(counter.getAndIncrement()) % instances.size();
         ServiceInstance selected = instances.get(index);
-        log.debug("RoundRobin selected instance: {}:{} (index={})", selected.getHost(), selected.getPort(), index);
+        log.debug("轮询选择的实例：{}:{} (index={})", selected.getHost(), selected.getPort(), index);
         return selected;
     }
 }
