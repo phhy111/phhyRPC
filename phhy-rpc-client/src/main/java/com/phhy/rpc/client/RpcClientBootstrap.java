@@ -1,12 +1,9 @@
 package com.phhy.rpc.client;
 
 import com.phhy.rpc.common.enums.SerializeType;
-import com.phhy.rpc.common.util.JwtUtils;
 import com.phhy.rpc.loadbalance.api.LoadBalancer;
 import com.phhy.rpc.loadbalance.impl.RoundRobinBalancer;
 import com.phhy.rpc.proxy.RpcClientProxy;
-import com.phhy.rpc.proxy.filter.AuthFilter;
-import com.phhy.rpc.proxy.filter.EncryptionFilter;
 import com.phhy.rpc.proxy.filter.Filter;
 import com.phhy.rpc.proxy.filter.FilterChain;
 import com.phhy.rpc.proxy.filter.LogFilter;
@@ -29,9 +26,6 @@ public class RpcClientBootstrap {
     private NettyRpcClient nettyRpcClient;
     private ClientHeartbeatManager heartbeatManager;
     private final FilterChain filterChain = new FilterChain();
-    private String authToken;
-    private String jwtSecret = "phhy-rpc-default-jwt-secret";
-    private long jwtExpireMillis = 30 * 60 * 1000L;
 
     public RpcClientBootstrap nacosAddr(String nacosAddr) {
         this.nacosAddr = nacosAddr;
@@ -63,24 +57,7 @@ public class RpcClientBootstrap {
         return this;
     }
 
-    public RpcClientBootstrap withAuthToken(String authToken) {
-        this.authToken = authToken;
-        return this;
-    }
-
-    public RpcClientBootstrap jwtSecret(String jwtSecret) {
-        this.jwtSecret = jwtSecret;
-        return this;
-    }
-
-    public RpcClientBootstrap jwtExpireMillis(long jwtExpireMillis) {
-        this.jwtExpireMillis = jwtExpireMillis;
-        return this;
-    }
-
     public void start() {
-        JwtUtils.configure(jwtSecret, jwtExpireMillis);
-
         // 创建Nacos服务发现（如果未外部注入）
         if (serviceDiscovery == null) {
             serviceDiscovery = new NacosDiscovery(nacosAddr);
@@ -104,10 +81,6 @@ public class RpcClientBootstrap {
         heartbeatManager.start();
 
         // 添加默认日志Filter
-        filterChain.addFilter(new EncryptionFilter());
-        if (authToken != null && !authToken.isBlank()) {
-            filterChain.addFilter(new AuthFilter(authToken));
-        }
         filterChain.addFilter(new LogFilter());
 
         log.info("RPC 客户端引导完成");

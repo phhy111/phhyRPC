@@ -2,7 +2,6 @@ package com.phhy.rpc.server;
 
 import com.phhy.rpc.common.enums.SerializeType;
 import com.phhy.rpc.common.model.ServiceInstance;
-import com.phhy.rpc.common.util.JwtUtils;
 import com.phhy.rpc.common.util.NetUtils;
 import com.phhy.rpc.registry.api.ServiceRegistry;
 import com.phhy.rpc.server.health.ServerHealthChecker;
@@ -23,8 +22,6 @@ public class RpcServerBootstrap {
     private ServiceRegistry nacosRegistry;
     private NettyRpcServer nettyRpcServer;
     private ServerHealthChecker healthChecker;
-    private String jwtSecret = "phhy-rpc-default-jwt-secret";
-    private long jwtExpireMillis = 30 * 60 * 1000L;
 
     public RpcServerBootstrap port(int port) {
         this.port = port;
@@ -46,16 +43,6 @@ public class RpcServerBootstrap {
         return this;
     }
 
-    public RpcServerBootstrap jwtSecret(String jwtSecret) {
-        this.jwtSecret = jwtSecret;
-        return this;
-    }
-
-    public RpcServerBootstrap jwtExpireMillis(long jwtExpireMillis) {
-        this.jwtExpireMillis = jwtExpireMillis;
-        return this;
-    }
-
     // 注册服务实现
     public RpcServerBootstrap publishService(Class<?> interfaceClass, Object impl) {
         serviceRegistry.put(interfaceClass.getName(), impl);
@@ -63,8 +50,6 @@ public class RpcServerBootstrap {
     }
 
     public void start() throws Exception {
-        JwtUtils.configure(jwtSecret, jwtExpireMillis);
-
         // 创建Nacos注册中心（如果未外部注入）
         if (nacosRegistry == null) {
             nacosRegistry = new com.phhy.rpc.registry.impl.NacosRegistry(nacosAddr);

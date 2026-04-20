@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.phhy.rpc.common.serialization.Serializer;
-import com.phhy.rpc.common.util.SensitiveDataProcessor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -26,7 +25,6 @@ public class JsonSerializer implements Serializer {
             return new byte[0];
         }
         try {
-            SensitiveDataProcessor.encryptSensitiveFields(obj);
             return objectMapper.writeValueAsBytes(obj);
         } catch (Exception e) {
             log.error("JSON 序列化错误", e);
@@ -40,9 +38,7 @@ public class JsonSerializer implements Serializer {
             return null;
         }
         try {
-            T value = objectMapper.readValue(bytes, clazz);
-            SensitiveDataProcessor.decryptSensitiveFields(value);
-            return value;
+            return objectMapper.readValue(bytes, clazz);
         } catch (Exception e) {
             log.error("JSON 反序列化错误", e);
             throw new RuntimeException("JSON 反序列化错误", e);
