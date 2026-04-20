@@ -10,6 +10,9 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public final class SensitiveDataProcessor {
 
     private static final String ENCRYPTION_PREFIX = "ENC(";
@@ -72,7 +75,8 @@ public final class SensitiveDataProcessor {
                 } else {
                     walk(value, visited, encrypt);
                 }
-            } catch (IllegalAccessException ignored) {
+            } catch (IllegalAccessException e) {
+                log.warn("无法访问字段 {}.{}，跳过敏感数据处理", clazz.getName(), field.getName(), e);
             }
         }
     }

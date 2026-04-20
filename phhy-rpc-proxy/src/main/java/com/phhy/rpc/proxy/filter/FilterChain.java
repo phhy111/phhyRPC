@@ -1,5 +1,6 @@
 package com.phhy.rpc.proxy.filter;
 
+import com.phhy.rpc.common.exception.RpcException;
 import com.phhy.rpc.common.model.RpcRequest;
 import com.phhy.rpc.common.model.RpcResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -16,12 +17,21 @@ public class FilterChain {
         filters.add(filter);
     }
 
+    /**
+     * 插入到链首，适用于认证等必须最先执行的过滤器。
+     */
+    public void addFirst(Filter filter) {
+        filters.add(0, filter);
+    }
+
     public void doFilterBefore(RpcRequest request) {
         for (Filter filter : filters) {
             try {
                 filter.doFilterBefore(request);
+            } catch (RpcException e) {
+                throw e;
             } catch (Exception e) {
-                log.warn("错误前的过滤： {}", filter.getClass().getSimpleName(), e);
+                log.warn("Filter 前置处理异常： {}", filter.getClass().getSimpleName(), e);
             }
         }
     }
@@ -30,8 +40,10 @@ public class FilterChain {
         for (Filter filter : filters) {
             try {
                 filter.doFilterAfter(request, response);
+            } catch (RpcException e) {
+                throw e;
             } catch (Exception e) {
-                log.warn("错误后过滤： {}", filter.getClass().getSimpleName(), e);
+                log.warn("Filter 后置处理异常： {}", filter.getClass().getSimpleName(), e);
             }
         }
     }

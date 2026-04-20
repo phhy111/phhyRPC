@@ -30,15 +30,34 @@ public class NettyRpcServer {
     private final int port;
     private final Map<String, Object> serviceRegistry;
     private final SerializeType serializeType;
+    private final boolean authRequired;
+    private final boolean sensitiveDataProcessing;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
-    private ExecutorService businessExecutor;
+    private ThreadPoolExecutor businessExecutor;
     private Channel serverChannel;
 
     public NettyRpcServer(int port, Map<String, Object> serviceRegistry, SerializeType serializeType) {
+        this(port, serviceRegistry, serializeType, false, false);
+    }
+
+    public NettyRpcServer(int port,
+                          Map<String, Object> serviceRegistry,
+                          SerializeType serializeType,
+                          boolean authRequired,
+                          boolean sensitiveDataProcessing) {
         this.port = port;
         this.serviceRegistry = serviceRegistry;
         this.serializeType = serializeType;
+        this.authRequired = authRequired;
+        this.sensitiveDataProcessing = sensitiveDataProcessing;
+    }
+
+    /**
+     * 供健康检查等组件监控业务队列积压，避免使用 CallerRunsPolicy 在 IO 线程执行业务逻辑。
+     */
+    public ThreadPoolExecutor getBusinessExecutor() {
+        return businessExecutor;
     }
 
     public void start() throws Exception {
@@ -59,7 +78,7 @@ public class NettyRpcServer {
                         return new Thread(r, "rpc-business-" + (count++));
                     }
                 },
-                new ThreadPoolExecutor.CallerRunsPolicy());
+                new ThreadPoolExecutor.AbortPolicy());
 
         SelfSignedCertificate ssc = new SelfSignedCertificate();
         SslContext sslContext = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey())
@@ -100,7 +119,11 @@ public class NettyRpcServer {
                                                 .addLast(new RpcMessageDecoder())
                                                 .addLast(new RpcMessageToHttp2FrameEncoder())
                                                 .addLast(new ServerHeartbeatHandler())
-                                                .addLast(new RpcServerHandler(serviceRegistry, businessExecutor));
+                                                .addLast(new RpcServerHandler(
+                                                        serviceRegistry,
+                                                        businessExecutor,
+                                                        authRequired,
+                                                        sensitiveDataProcessing));
                                     }
                                 }));
                     }

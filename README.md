@@ -21,7 +21,7 @@
 2. 代理层 `RpcClientProxy` 构造 `RpcRequest`，执行 Filter 链前置逻辑。
 3. 从注册中心发现服务实例，经负载均衡选择目标节点。
 4. `NettyRpcClient` 通过 HTTP/2 Stream 发送请求并等待响应。
-5. 服务端 `RpcServerHandler` 收到请求后做鉴权、参数转换和反射调用。
+5. 服务端 `RpcServerHandler` 收到请求后（可选 JWT 校验与敏感字段解密）、反射调用，再返回响应（可选敏感字段加密）。
 6. 返回 `RpcResponse`，客户端执行 Filter 链后置逻辑并返回结果或抛出远程异常。
 
 ## 3. JWT 认证
@@ -32,7 +32,7 @@
 - `AuthFilter`：客户端请求前注入并校验 token。
 - `AuthContext`：服务端请求线程内保存认证信息（subject/token）。
 - `RpcRequest.authToken`：请求级认证字段。
-- `RpcServerHandler`：服务端请求入口校验 token，失败返回认证异常。
+- `RpcServerHandler`：在配置了 `jwtSecret` 时校验 `RpcRequest.authToken`，失败返回错误响应；与 `EncryptionFilter` 配合时做入参解密与返回值加密。
 
 ### 3.2 使用方式
 
@@ -50,7 +50,9 @@ RpcClientBootstrap client = new RpcClientBootstrap()
 client.start();
 ```
 
-服务端：
+`start()` 内会再次调用 `JwtUtils.configure`（与上述配置一致即可）。也可在 `start()` 之前自行 `JwtUtils.configure` 并生成 token。
+
+服务端（配置了 `jwtSecret` 即开启鉴权，需与客户端密钥一致）：
 
 ```java
 new RpcServerBootstrap()
@@ -62,7 +64,7 @@ new RpcServerBootstrap()
         .start();
 ```
 
-## 4. 新增能力：敏感数据加密
+## 4.敏感数据加密
 
 ### 4.1 关键组件
 
@@ -70,7 +72,7 @@ new RpcServerBootstrap()
 - `EncryptionUtils`：AES/RSA 加解密与密钥生成。
 - `KeyManager`：密钥获取与轮换（当前提供内存实现）。
 - `SensitiveDataProcessor`：递归处理对象图中的敏感字段。
-- `EncryptionFilter`：请求前加密、响应后解密。
+- `EncryptionFilter`：客户端请求前加密、响应后解密；服务端需在 `RpcServerBootstrap` 上启用 `sensitiveDataProcessing(true)`，与客户端成对使用。
 
 ### 4.2 示例模型
 
@@ -108,4 +110,5 @@ mvn -DskipTests compile
 - `JwtUtils` 为轻量自实现，适合学习与框架演示；生产环境建议使用成熟 JWT 库并增加更多 claim 校验。
 - `KeyManager` 当前为进程内存存储，生产建议接入 KMS/Vault 等外部密钥系统。
 - 参数反射调用前已增加类型对齐逻辑（处理 JSON 下 `Map -> POJO` 的参数转换问题）。
+- 业务线程池使用 `AbortPolicy`，队列满时快速失败并返回「服务器繁忙」，避免在 Netty I/O 线程执行业务逻辑。
 

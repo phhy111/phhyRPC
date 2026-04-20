@@ -10,6 +10,8 @@ public class ExampleServer {
         new RpcServerBootstrap()
                 .port(8080)
                 .nacosAddr("127.0.0.1:8848")
+                .jwtSecret("demo-rpc-jwt-secret")
+                .jwtExpireMillis(60_000)
                 .publishService(HelloService.class, new HelloServiceImpl())
                 .start();
 

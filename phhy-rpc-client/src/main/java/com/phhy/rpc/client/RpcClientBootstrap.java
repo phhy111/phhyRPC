@@ -1,9 +1,11 @@
 package com.phhy.rpc.client;
 
 import com.phhy.rpc.common.enums.SerializeType;
+import com.phhy.rpc.common.util.JwtUtils;
 import com.phhy.rpc.loadbalance.api.LoadBalancer;
 import com.phhy.rpc.loadbalance.impl.RoundRobinBalancer;
 import com.phhy.rpc.proxy.RpcClientProxy;
+import com.phhy.rpc.proxy.filter.AuthFilter;
 import com.phhy.rpc.proxy.filter.Filter;
 import com.phhy.rpc.proxy.filter.FilterChain;
 import com.phhy.rpc.proxy.filter.LogFilter;
@@ -20,6 +22,10 @@ public class RpcClientBootstrap {
     private String nacosAddr = "127.0.0.1:8848";
     private SerializeType serializeType = SerializeType.JSON;
     private long timeout = 5000;
+    /** 与 {@link JwtUtils#configure} 一致，启用 {@link #withAuthToken} 前应配置 */
+    private String jwtSecret;
+    private long jwtExpireMillis = 30 * 60 * 1000L;
+    private String authToken;
     private LoadBalancer loadBalancer;
     private ServiceDiscovery serviceDiscovery;
     private ServiceCacheManager serviceCacheManager;
@@ -39,6 +45,24 @@ public class RpcClientBootstrap {
 
     public RpcClientBootstrap timeout(long timeout) {
         this.timeout = timeout;
+        return this;
+    }
+
+    public RpcClientBootstrap jwtSecret(String jwtSecret) {
+        this.jwtSecret = jwtSecret;
+        return this;
+    }
+
+    public RpcClientBootstrap jwtExpireMillis(long jwtExpireMillis) {
+        this.jwtExpireMillis = jwtExpireMillis;
+        return this;
+    }
+
+    /**
+     * 为每个请求携带 JWT；请先通过 {@link #jwtSecret(String)} 配置与服务端相同的密钥与过期时间。
+     */
+    public RpcClientBootstrap withAuthToken(String authToken) {
+        this.authToken = authToken;
         return this;
     }
 
@@ -80,7 +104,13 @@ public class RpcClientBootstrap {
         nettyRpcClient.setHeartbeatManager(heartbeatManager);
         heartbeatManager.start();
 
-        // 添加默认日志Filter
+        if (jwtSecret != null && !jwtSecret.isBlank()) {
+            JwtUtils.configure(jwtSecret, jwtExpireMillis);
+        }
+        if (authToken != null && !authToken.isBlank()) {
+            filterChain.addFirst(new AuthFilter(authToken));
+        }
+
         filterChain.addFilter(new LogFilter());
 
         log.info("RPC 客户端引导完成");

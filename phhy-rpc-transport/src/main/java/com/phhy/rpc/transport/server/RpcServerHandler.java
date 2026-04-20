@@ -1,12 +1,14 @@
 package com.phhy.rpc.transport.server;
 
+import com.phhy.rpc.common.auth.AuthContext;
 import com.phhy.rpc.common.constant.RpcConstant;
 import com.phhy.rpc.common.enums.MsgType;
 import com.phhy.rpc.common.enums.SerializeType;
 import com.phhy.rpc.common.exception.RpcException;
-import com.phhy.rpc.common.exception.RpcRemoteException;
 import com.phhy.rpc.common.model.RpcRequest;
 import com.phhy.rpc.common.model.RpcResponse;
+import com.phhy.rpc.common.util.JwtUtils;
+import com.phhy.rpc.common.util.SensitiveDataProcessor;
 import com.phhy.rpc.protocol.model.RpcMessage;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -14,7 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.RejectedExecutionException;
 
 @Slf4j
 public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
@@ -23,10 +25,17 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
     private final Map<String, Object> serviceRegistry;
     // 业务线程池，避免阻塞IO线程
     private final ExecutorService businessExecutor;
+    private final boolean authRequired;
+    private final boolean sensitiveDataProcessing;
 
-    public RpcServerHandler(Map<String, Object> serviceRegistry, ExecutorService businessExecutor) {
+    public RpcServerHandler(Map<String, Object> serviceRegistry,
+                            ExecutorService businessExecutor,
+                            boolean authRequired,
+                            boolean sensitiveDataProcessing) {
         this.serviceRegistry = serviceRegistry;
         this.businessExecutor = businessExecutor;
+        this.authRequired = authRequired;
+        this.sensitiveDataProcessing = sensitiveDataProcessing;
     }
 
     @Override
@@ -46,8 +55,14 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
         }
 
         if (msg.getMsgType() == MsgType.REQUEST) {
-            // 提交到业务线程池执行反射调用等耗时操作
-            businessExecutor.submit(() -> handleRequest(ctx, msg));
+            try {
+                businessExecutor.submit(() -> handleRequest(ctx, msg));
+            } catch (RejectedExecutionException e) {
+                log.error("业务线程池已满，拒绝请求 requestId={}", msg.getRequestId(), e);
+                RpcResponse response = RpcResponse.fail(msg.getRequestId(),
+                        new RpcException("服务器繁忙，请稍后重试", e));
+                sendResponse(ctx, msg.getRequestId(), msg.getSerializeType(), response);
+            }
         }
     }
 
@@ -57,22 +72,35 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
         SerializeType serializeType = msg.getSerializeType();
 
         try {
-            // 从服务注册表中查找实现对象
-            Object service = serviceRegistry.get(request.getInterfaceName());
-            if (service == null) {
-                throw new RpcException("未找到服务： " + request.getInterfaceName());
+            if (authRequired) {
+                String subject = JwtUtils.validateAndGetSubject(request.getAuthToken());
+                AuthContext.set(subject, request.getAuthToken());
             }
+            try {
+                if (sensitiveDataProcessing) {
+                    SensitiveDataProcessor.decryptSensitiveFields(request);
+                }
 
-            // 反射调用目标方法
-            java.lang.reflect.Method method = service.getClass().getMethod(
-                    request.getMethodName(), request.getParameterTypes());
-            Object result = method.invoke(service, request.getParameters());
+                Object service = serviceRegistry.get(request.getInterfaceName());
+                if (service == null) {
+                    throw new RpcException("未找到服务： " + request.getInterfaceName());
+                }
 
-            // 构造成功响应
-            RpcResponse response = RpcResponse.success(requestId, result);
-            sendResponse(ctx, requestId, serializeType, response);
+                java.lang.reflect.Method method = service.getClass().getMethod(
+                        request.getMethodName(), request.getParameterTypes());
+                Object result = method.invoke(service, request.getParameters());
+
+                RpcResponse response = RpcResponse.success(requestId, result);
+                if (sensitiveDataProcessing) {
+                    SensitiveDataProcessor.encryptSensitiveFields(response);
+                }
+                sendResponse(ctx, requestId, serializeType, response);
+            } finally {
+                if (authRequired) {
+                    AuthContext.clear();
+                }
+            }
         } catch (java.lang.reflect.InvocationTargetException e) {
-            // 捕获InvocationTargetException，提取原始异常
             Throwable targetException = e.getTargetException();
             log.error("服务调用失败： {}.{}", request.getInterfaceName(), request.getMethodName(), targetException);
             RpcResponse response = RpcResponse.fail(requestId, targetException);

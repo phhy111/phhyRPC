@@ -2,13 +2,16 @@ package com.phhy.rpc.server;
 
 import com.phhy.rpc.common.enums.SerializeType;
 import com.phhy.rpc.common.model.ServiceInstance;
+import com.phhy.rpc.common.util.JwtUtils;
 import com.phhy.rpc.common.util.NetUtils;
 import com.phhy.rpc.registry.api.ServiceRegistry;
 import com.phhy.rpc.server.health.ServerHealthChecker;
 import com.phhy.rpc.transport.server.NettyRpcServer;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -18,10 +21,15 @@ public class RpcServerBootstrap {
     private int port = 8080;
     private String nacosAddr = "127.0.0.1:8848";
     private SerializeType serializeType = SerializeType.JSON;
+    /** 非空时启用 JWT 校验，需与客户端 {@link JwtUtils#configure} 使用相同密钥与过期策略 */
+    private String jwtSecret;
+    private long jwtExpireMillis = 30 * 60 * 1000L;
+    /** 与客户端 {@code EncryptionFilter} 成对开启：入参解密、返回值加密 */
+    private boolean sensitiveDataProcessing;
     private final Map<String, Object> serviceRegistry = new HashMap<>();
     private ServiceRegistry nacosRegistry;
     private NettyRpcServer nettyRpcServer;
-    private ServerHealthChecker healthChecker;
+    private final List<ServerHealthChecker> healthCheckers = new ArrayList<>();
 
     public RpcServerBootstrap port(int port) {
         this.port = port;
@@ -35,6 +43,21 @@ public class RpcServerBootstrap {
 
     public RpcServerBootstrap serializeType(SerializeType serializeType) {
         this.serializeType = serializeType;
+        return this;
+    }
+
+    public RpcServerBootstrap jwtSecret(String jwtSecret) {
+        this.jwtSecret = jwtSecret;
+        return this;
+    }
+
+    public RpcServerBootstrap jwtExpireMillis(long jwtExpireMillis) {
+        this.jwtExpireMillis = jwtExpireMillis;
+        return this;
+    }
+
+    public RpcServerBootstrap sensitiveDataProcessing(boolean enable) {
+        this.sensitiveDataProcessing = enable;
         return this;
     }
 
@@ -55,8 +78,12 @@ public class RpcServerBootstrap {
             nacosRegistry = new com.phhy.rpc.registry.impl.NacosRegistry(nacosAddr);
         }
 
-        // 启动Netty RPC服务端
-        nettyRpcServer = new NettyRpcServer(port, serviceRegistry, serializeType);
+        boolean authRequired = jwtSecret != null && !jwtSecret.isBlank();
+        if (authRequired) {
+            JwtUtils.configure(jwtSecret, jwtExpireMillis);
+        }
+
+        nettyRpcServer = new NettyRpcServer(port, serviceRegistry, serializeType, authRequired, sensitiveDataProcessing);
         nettyRpcServer.start();
 
         // 注册所有服务到Nacos
@@ -77,9 +104,10 @@ public class RpcServerBootstrap {
                     .build();
             nacosRegistry.register(instance);
 
-            // 启动健康检查
-            healthChecker = new ServerHealthChecker(nacosRegistry, instance);
-            healthChecker.start();
+            ServerHealthChecker checker = new ServerHealthChecker(nacosRegistry, instance);
+            checker.setMonitoredThreadPool(nettyRpcServer.getBusinessExecutor());
+            checker.start();
+            healthCheckers.add(checker);
         }
 
         // 注册JVM ShutdownHook实现优雅停机
@@ -92,9 +120,10 @@ public class RpcServerBootstrap {
         log.info("正在关闭 RPC 服务器...");
 
         // 按顺序执行：停止健康检查 → 从Nacos注销服务 → 关闭Netty Server
-        if (healthChecker != null) {
-            healthChecker.stop();
+        for (ServerHealthChecker checker : healthCheckers) {
+            checker.stop();
         }
+        healthCheckers.clear();
 
         if (nacosRegistry != null) {
             String localHost = NetUtils.getLocalHost();
