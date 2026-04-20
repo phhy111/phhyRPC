@@ -23,5 +23,7 @@ public class RpcRequest implements Serializable {
 
     private Object[] parameters;
 
+    private String authToken;
+
     private long timeout;
 }

@@ -5,4 +5,6 @@ public interface HelloService {
     String hello(String name);
 
     String hello(String name, int age);
+
+    String register(UserProfile profile);
 }

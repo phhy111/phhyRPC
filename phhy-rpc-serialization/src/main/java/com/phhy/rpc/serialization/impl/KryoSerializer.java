@@ -5,6 +5,7 @@ import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import com.esotericsoftware.kryo.util.Pool;
 import com.phhy.rpc.common.serialization.Serializer;
+import com.phhy.rpc.common.util.SensitiveDataProcessor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -50,6 +51,7 @@ public class KryoSerializer implements Serializer {
         Kryo kryo = kryoPool.obtain();
         Output output = outputPool.obtain();
         try {
+            SensitiveDataProcessor.encryptSensitiveFields(obj);
             kryo.writeClassAndObject(output, obj);
             return output.toBytes();
         } catch (Exception e) {
@@ -72,7 +74,9 @@ public class KryoSerializer implements Serializer {
         try {
             input.setBuffer(bytes);
             Object obj = kryo.readClassAndObject(input);
-            return clazz.cast(obj);
+            T castObj = clazz.cast(obj);
+            SensitiveDataProcessor.decryptSensitiveFields(castObj);
+            return castObj;
         } catch (Exception e) {
             log.error("Kryo 反序列化错误", e);
             throw new RuntimeException("Kryo 反序列化错误", e);
