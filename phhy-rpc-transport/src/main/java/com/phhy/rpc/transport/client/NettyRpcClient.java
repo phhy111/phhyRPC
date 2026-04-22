@@ -12,6 +12,8 @@ import com.phhy.rpc.protocol.codec.RpcMessageEncoder;
 import com.phhy.rpc.protocol.model.RpcMessage;
 import com.phhy.rpc.transport.codec.Http2StreamFrameToByteBufDecoder;
 import com.phhy.rpc.transport.codec.RpcMessageToHttp2FrameEncoder;
+import com.phhy.rpc.transport.pool.ConnectionPoolConfig;
+import com.phhy.rpc.transport.pool.SmartConnectionPool;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
@@ -25,6 +27,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.handler.ssl.SupportedCipherSuiteFilter;
+import io.netty.handler.codec.http2.Http2SecurityUtil;
 import io.netty.util.AttributeKey;
 import io.netty.util.AsciiString;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -42,7 +45,7 @@ public class NettyRpcClient {
     private static final AsciiString SCHEME_HTTPS = AsciiString.cached("https");
 
     private final EventLoopGroup workerGroup;
-    private final ChannelManager channelManager;
+    private final SmartConnectionPool connectionPool;
     private final UnprocessedRequests unprocessedRequests;
     private final RpcMessageEncoder rpcMessageEncoder = new RpcMessageEncoder();
     private final AtomicInteger requestIdGenerator = new AtomicInteger(0);
@@ -50,9 +53,13 @@ public class NettyRpcClient {
     private ClientHeartbeatManager heartbeatManager;
 
     public NettyRpcClient(SerializeType serializeType) {
+        this(serializeType, null);
+    }
+
+    public NettyRpcClient(SerializeType serializeType, ConnectionPoolConfig poolConfig) {
         this.serializeType = serializeType;
         this.workerGroup = new NioEventLoopGroup();
-        this.channelManager = new ChannelManager();
+        this.connectionPool = new SmartConnectionPool(poolConfig, workerGroup);
         this.unprocessedRequests = new UnprocessedRequests();
     }
 
@@ -64,11 +71,15 @@ public class NettyRpcClient {
         return heartbeatManager;
     }
 
+    public SmartConnectionPool getConnectionPool() {
+        return connectionPool;
+    }
+
     public Http2StreamChannelBootstrap createStreamBootstrap(Channel parentChannel) {
         Http2StreamChannelBootstrap bootstrap = new Http2StreamChannelBootstrap(parentChannel);
         bootstrap.handler(new ChannelInitializer<Channel>() {
             @Override
-            protected void initChannel(Channel ch) throws Exception {
+            protected void initChannel(Channel ch) {
                 ensureStreamPipeline(ch);
             }
         });
@@ -93,50 +104,71 @@ public class NettyRpcClient {
 
     public RpcResponse sendRequest(RpcRequest request, String host, int port) {
         String key = host + ":" + port;
-        Channel channel = getOrCreateChannel(host, port, key);
+        long startTime = System.currentTimeMillis();
+        Channel channel = null;
+        boolean acquired = false;
 
-        long requestId = requestIdGenerator.getAndIncrement();
-
-        RpcMessage rpcMessage = RpcMessage.builder()
-                .version(RpcConstant.VERSION)
-                .msgType(MsgType.REQUEST)
-                .serializeType(serializeType)
-                .requestId(requestId)
-                .body(request)
-                .build();
-
-        java.util.concurrent.CompletableFuture<RpcResponse> future = new java.util.concurrent.CompletableFuture<>();
-        unprocessedRequests.put(requestId, future);
-
-        Http2StreamChannelBootstrap streamBootstrap = createStreamBootstrap(channel);
-        streamBootstrap.open().addListener((GenericFutureListener<io.netty.util.concurrent.Future<Http2StreamChannel>>) streamFuture -> {
-            if (streamFuture.isSuccess()) {
-                Http2StreamChannel streamChannel = streamFuture.getNow();
-                ensureStreamPipeline(streamChannel);
-                writeRpcMessage(streamChannel, rpcMessage).addListener((ChannelFutureListener) writeFuture -> {
-                    if (!writeFuture.isSuccess()) {
-                        unprocessedRequests.remove(requestId);
-                        log.error("发送请求失败至 {}: {}", key, writeFuture.cause().getMessage(), writeFuture.cause());
-                        future.completeExceptionally(new RpcException("发送请求失败至 " + key, writeFuture.cause()));
-                        streamChannel.close();
-                    }
-                });
-            } else {
-                unprocessedRequests.remove(requestId);
-                log.error("创建流通道失败至 {}: {}", key, streamFuture.cause().getMessage(), streamFuture.cause());
-                future.completeExceptionally(new RpcException("创建流通道失败至 " + key, streamFuture.cause()));
-            }
-        });
-
-        long timeout = request.getTimeout() > 0 ? request.getTimeout() : RpcConstant.DEFAULT_TIMEOUT;
         try {
-            return future.get(timeout, TimeUnit.MILLISECONDS);
-        } catch (java.util.concurrent.TimeoutException e) {
-            unprocessedRequests.remove(requestId);
-            throw new RpcTimeoutException("请求超时后 " + timeout + "毫秒用于 " + key);
+            channel = connectionPool.acquireChannel(host, port);
+            acquired = true;
+
+            long requestId = requestIdGenerator.getAndIncrement();
+
+            RpcMessage rpcMessage = RpcMessage.builder()
+                    .version(RpcConstant.VERSION)
+                    .msgType(MsgType.REQUEST)
+                    .serializeType(serializeType)
+                    .requestId(requestId)
+                    .body(request)
+                    .build();
+
+            java.util.concurrent.CompletableFuture<RpcResponse> future = new java.util.concurrent.CompletableFuture<>();
+            unprocessedRequests.put(requestId, future);
+
+            Http2StreamChannelBootstrap streamBootstrap = createStreamBootstrap(channel);
+            streamBootstrap.open().addListener((GenericFutureListener<io.netty.util.concurrent.Future<Http2StreamChannel>>) streamFuture -> {
+                if (streamFuture.isSuccess()) {
+                    Http2StreamChannel streamChannel = streamFuture.getNow();
+                    ensureStreamPipeline(streamChannel);
+                    writeRpcMessage(streamChannel, rpcMessage).addListener((ChannelFutureListener) writeFuture -> {
+                        if (!writeFuture.isSuccess()) {
+                            unprocessedRequests.remove(requestId);
+                            log.error("发送请求失败至 {}: {}", key, writeFuture.cause().getMessage(), writeFuture.cause());
+                            future.completeExceptionally(new RpcException("发送请求失败至 " + key, writeFuture.cause()));
+                            streamChannel.close();
+                        }
+                    });
+                } else {
+                    unprocessedRequests.remove(requestId);
+                    log.error("创建流通道失败至 {}: {}", key, streamFuture.cause().getMessage(), streamFuture.cause());
+                    future.completeExceptionally(new RpcException("创建流通道失败至 " + key, streamFuture.cause()));
+                }
+            });
+
+            long timeout = request.getTimeout() > 0 ? request.getTimeout() : RpcConstant.DEFAULT_TIMEOUT;
+            try {
+                RpcResponse response = future.get(timeout, TimeUnit.MILLISECONDS);
+                long responseTime = System.currentTimeMillis() - startTime;
+                connectionPool.getMetrics(key).recordSuccess(responseTime);
+                return response;
+            } catch (java.util.concurrent.TimeoutException e) {
+                unprocessedRequests.remove(requestId);
+                connectionPool.getMetrics(key).recordFailure();
+                throw new RpcTimeoutException("请求超时后 " + timeout + "毫秒用于 " + key);
+            } catch (Exception e) {
+                unprocessedRequests.remove(requestId);
+                connectionPool.getMetrics(key).recordFailure();
+                throw new RpcException("请求失败 " + key, e);
+            }
+        } catch (RpcException e) {
+            throw e;
         } catch (Exception e) {
-            unprocessedRequests.remove(requestId);
-            throw new RpcException("请求失败 " + key, e);
+            connectionPool.getMetrics(key).recordFailure();
+            throw new RpcException("获取连接或发送请求失败 " + key, e);
+        } finally {
+            if (acquired && channel != null) {
+                connectionPool.releaseChannel(host, port, channel);
+            }
         }
     }
 
@@ -158,85 +190,15 @@ public class NettyRpcClient {
         return streamChannel.writeAndFlush(new DefaultHttp2DataFrame(payload, true));
     }
 
-    private Channel getOrCreateChannel(String host, int port, String key) {
-        if (channelManager.isFault(key)) {
-            channelManager.removeChannel(key);
-        }
-
-        Channel channel = channelManager.getChannel(key);
-        if (channel != null) {
-            return channel;
-        }
-
-        try {
-            channel = createChannel(host, port);
-            channel.attr(SERVER_KEY_ATTR).set(key);
-            channel.closeFuture().addListener((ChannelFutureListener) closeFuture -> {
-                unprocessedRequests.completeAllExceptionally(
-                        new RuntimeException("Connection closed: " + key));
-            });
-            channelManager.putChannel(key, channel);
-            ClientHeartbeatManager heartbeatManager = getHeartbeatManager();
-            if (heartbeatManager != null) {
-                heartbeatManager.addServer(key);
-            }
-            return channel;
-        } catch (Exception e) {
-            channelManager.markFault(key);
-            throw new RpcException("Failed to connect to " + key, e);
-        }
+    public void warmup(String host, int port) {
+        connectionPool.warmup(host, port);
     }
 
-    private Channel createChannel(String host, int port) throws Exception {
-        Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(workerGroup)
-                .channel(NioSocketChannel.class)
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
-                .option(ChannelOption.TCP_NODELAY, true)
-                .option(ChannelOption.SO_KEEPALIVE, true)
-                .handler(new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(SocketChannel ch) throws Exception {
-                        ChannelPipeline pipeline = ch.pipeline();
-
-                        SslContext sslContext = SslContextBuilder.forClient()
-                                .ciphers(Http2SecurityUtil.CIPHERS, SupportedCipherSuiteFilter.INSTANCE)
-                                .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                                .applicationProtocolConfig(new ApplicationProtocolConfig(
-                                        ApplicationProtocolConfig.Protocol.ALPN,
-                                        ApplicationProtocolConfig.SelectorFailureBehavior.NO_ADVERTISE,
-                                        ApplicationProtocolConfig.SelectedListenerFailureBehavior.ACCEPT,
-                                        ApplicationProtocolNames.HTTP_2,
-                                        ApplicationProtocolNames.HTTP_1_1))
-                                .build();
-
-                        pipeline.addLast(sslContext.newHandler(ch.alloc(), host, port));
-
-                        Http2FrameCodecBuilder frameCodecBuilder = Http2FrameCodecBuilder.forClient();
-                        frameCodecBuilder.initialSettings(new Http2Settings()
-                                .maxConcurrentStreams(100)
-                                .initialWindowSize(1048576));
-                        pipeline.addLast(frameCodecBuilder.build());
-
-                        pipeline.addLast(new Http2MultiplexHandler(new ChannelInitializer<Channel>() {
-                            @Override
-                            protected void initChannel(Channel ch) throws Exception {
-                                ch.pipeline()
-                                        .addLast(new Http2StreamFrameToByteBufDecoder())
-                                        .addLast(new RpcMessageDecoder())
-                                        .addLast(new RpcMessageToHttp2FrameEncoder())
-                                        .addLast(new RpcClientHandler(unprocessedRequests, NettyRpcClient.this));
-                            }
-                        }));
-                    }
-                });
-
-        ChannelFuture future = bootstrap.connect(host, port).sync();
-        return future.channel();
-    }
-
-    public ChannelManager getChannelManager() {
-        return channelManager;
+    public void markFault(String host, int port) {
+        connectionPool.markFault(host, port);
+        if (heartbeatManager != null) {
+            heartbeatManager.removeServer(host + ":" + port);
+        }
     }
 
     public UnprocessedRequests getUnprocessedRequests() {
@@ -244,7 +206,7 @@ public class NettyRpcClient {
     }
 
     public void shutdown() {
-        channelManager.closeAll();
+        connectionPool.closeAll();
         workerGroup.shutdownGracefully();
     }
 }

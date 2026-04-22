@@ -10,19 +10,41 @@ import com.phhy.rpc.registry.api.ServiceRegistry;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
 public class NacosRegistry implements ServiceRegistry {
 
     private final NamingService namingService;
+    private static final long INIT_TIMEOUT_MILLIS = 10_000L;
 
     public NacosRegistry(String serverAddr) {
         try {
             this.namingService = NamingFactory.createNamingService(serverAddr);
+            waitForServerReady();
         } catch (NacosException e) {
             throw new RuntimeException("创建 Nacos NamingService 失败", e);
         }
+    }
+
+    private void waitForServerReady() {
+        long start = System.currentTimeMillis();
+        while (System.currentTimeMillis() - start < INIT_TIMEOUT_MILLIS) {
+            try {
+                namingService.getServicesOfServer(0, 1, "DEFAULT_GROUP");
+                log.info("Nacos 客户端已就绪");
+                return;
+            } catch (NacosException e) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        log.warn("Nacos 客户端等待就绪超时，继续执行...");
     }
 
     @Override
@@ -34,7 +56,6 @@ public class NacosRegistry implements ServiceRegistry {
             nacosInstance.setWeight(instance.getWeight());
             nacosInstance.setHealthy(true);
 
-            // 构建元数据
             Map<String, String> metadata = new HashMap<>();
             if (instance.getMetadata() != null) {
                 metadata.putAll(instance.getMetadata());
@@ -68,8 +89,7 @@ public class NacosRegistry implements ServiceRegistry {
     @Override
     public void updateHealthStatus(ServiceInstance instance, HealthStatus status) {
         try {
-            // 通过getAllInstances查询当前实例获取完整元数据
-            java.util.List<Instance> allInstances = namingService.getAllInstances(instance.getServiceName());
+            List<Instance> allInstances = namingService.getAllInstances(instance.getServiceName());
             Instance targetInstance = null;
             for (Instance inst : allInstances) {
                 if (inst.getIp().equals(instance.getHost()) && inst.getPort() == instance.getPort()) {
@@ -86,7 +106,6 @@ public class NacosRegistry implements ServiceRegistry {
             metadata.put("lastHeartbeat", String.valueOf(System.currentTimeMillis()));
             targetInstance.setMetadata(metadata);
 
-            // 先注销再重新注册以更新元数据
             namingService.deregisterInstance(instance.getServiceName(), targetInstance);
             targetInstance.setHealthy(status == HealthStatus.UP);
             namingService.registerInstance(instance.getServiceName(), targetInstance);

@@ -1,6 +1,7 @@
 package com.phhy.rpc.client;
 
 import com.phhy.rpc.common.enums.SerializeType;
+import com.phhy.rpc.common.model.ServiceInstance;
 import com.phhy.rpc.common.util.JwtUtils;
 import com.phhy.rpc.loadbalance.api.LoadBalancer;
 import com.phhy.rpc.loadbalance.impl.RoundRobinBalancer;
@@ -14,7 +15,10 @@ import com.phhy.rpc.registry.cache.ServiceCacheManager;
 import com.phhy.rpc.registry.impl.NacosDiscovery;
 import com.phhy.rpc.transport.client.ClientHeartbeatManager;
 import com.phhy.rpc.transport.client.NettyRpcClient;
+import com.phhy.rpc.transport.pool.ConnectionPoolConfig;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.List;
 
 @Slf4j
 public class RpcClientBootstrap {
@@ -22,7 +26,6 @@ public class RpcClientBootstrap {
     private String nacosAddr = "127.0.0.1:8848";
     private SerializeType serializeType = SerializeType.JSON;
     private long timeout = 5000;
-    /** 与 {@link JwtUtils#configure} 一致，启用 {@link #withAuthToken} 前应配置 */
     private String jwtSecret;
     private long jwtExpireMillis = 30 * 60 * 1000L;
     private String authToken;
@@ -31,6 +34,7 @@ public class RpcClientBootstrap {
     private ServiceCacheManager serviceCacheManager;
     private NettyRpcClient nettyRpcClient;
     private ClientHeartbeatManager heartbeatManager;
+    private ConnectionPoolConfig connectionPoolConfig;
     private final FilterChain filterChain = new FilterChain();
 
     public RpcClientBootstrap nacosAddr(String nacosAddr) {
@@ -58,9 +62,6 @@ public class RpcClientBootstrap {
         return this;
     }
 
-    /**
-     * 为每个请求携带 JWT；请先通过 {@link #jwtSecret(String)} 配置与服务端相同的密钥与过期时间。
-     */
     public RpcClientBootstrap withAuthToken(String authToken) {
         this.authToken = authToken;
         return this;
@@ -76,30 +77,30 @@ public class RpcClientBootstrap {
         return this;
     }
 
+    public RpcClientBootstrap connectionPoolConfig(ConnectionPoolConfig config) {
+        this.connectionPoolConfig = config;
+        return this;
+    }
+
     public RpcClientBootstrap addFilter(Filter filter) {
         this.filterChain.addFilter(filter);
         return this;
     }
 
     public void start() {
-        // 创建Nacos服务发现（如果未外部注入）
         if (serviceDiscovery == null) {
             serviceDiscovery = new NacosDiscovery(nacosAddr);
         }
 
-        // 创建本地服务缓存管理
         serviceCacheManager = new ServiceCacheManager(serviceDiscovery);
 
-        // 创建负载均衡（默认轮询）
         if (loadBalancer == null) {
             loadBalancer = new RoundRobinBalancer();
         }
 
-        // 创建Netty RPC客户端
-        nettyRpcClient = new NettyRpcClient(serializeType);
+        nettyRpcClient = new NettyRpcClient(serializeType, connectionPoolConfig);
 
-        // 创建并启动心跳管理
-        heartbeatManager = new ClientHeartbeatManager(nettyRpcClient.getChannelManager(), serializeType);
+        heartbeatManager = new ClientHeartbeatManager(nettyRpcClient.getConnectionPool(), serializeType);
         heartbeatManager.setNettyRpcClient(nettyRpcClient);
         nettyRpcClient.setHeartbeatManager(heartbeatManager);
         heartbeatManager.start();
@@ -116,7 +117,6 @@ public class RpcClientBootstrap {
         log.info("RPC 客户端引导完成");
     }
 
-    // 为服务接口创建代理对象
     public <T> T getService(Class<T> interfaceClass) {
         RpcClientProxy proxy = new RpcClientProxy(
                 interfaceClass,
@@ -126,6 +126,22 @@ public class RpcClientBootstrap {
                 filterChain,
                 timeout);
         return proxy.getProxy();
+    }
+
+    public void warmupService(String serviceName) {
+        if (nettyRpcClient == null) {
+            throw new IllegalStateException("客户端尚未启动，请先调用 start()");
+        }
+        List<ServiceInstance> instances = serviceCacheManager.getInstances(serviceName);
+        if (instances == null || instances.isEmpty()) {
+            log.warn("服务 {} 没有可用实例，跳过预热", serviceName);
+            return;
+        }
+        for (ServiceInstance instance : instances) {
+            nettyRpcClient.warmup(instance.getHost(), instance.getPort());
+            heartbeatManager.addServer(instance.toKey());
+        }
+        log.info("服务 {} 预热完成，实例数: {}", serviceName, instances.size());
     }
 
     public void shutdown() {
