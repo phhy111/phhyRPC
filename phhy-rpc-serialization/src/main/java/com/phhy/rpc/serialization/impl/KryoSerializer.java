@@ -77,7 +77,6 @@ public class KryoSerializer implements Serializer {
             log.error("Kryo 反序列化错误", e);
             throw new RuntimeException("Kryo 反序列化错误", e);
         } finally {
-            input.setBuffer(null);
             kryoPool.free(kryo);
             inputPool.free(input);
         }

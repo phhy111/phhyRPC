@@ -2,31 +2,24 @@ package com.phhy.rpc.transport.server;
 
 import com.phhy.rpc.common.enums.SerializeType;
 import com.phhy.rpc.protocol.codec.RpcMessageDecoder;
-import com.phhy.rpc.transport.codec.Http2StreamFrameToByteBufDecoder;
-import com.phhy.rpc.transport.codec.RpcMessageToHttp2FrameEncoder;
+import com.phhy.rpc.protocol.codec.RpcMessageEncoder;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
-import io.netty.handler.codec.http2.Http2FrameCodecBuilder;
-import io.netty.handler.codec.http2.Http2MultiplexHandler;
-import io.netty.handler.codec.http2.Http2SecurityUtil;
-import io.netty.handler.codec.http2.Http2Settings;
-import io.netty.handler.ssl.ApplicationProtocolConfig;
-import io.netty.handler.ssl.ApplicationProtocolNames;
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.SupportedCipherSuiteFilter;
-import io.netty.handler.ssl.util.SelfSignedCertificate;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.concurrent.*;
 
+/**
+ * 基于自定义 TCP 协议的 RPC 服务端（无 HTTP/2、无 TLS）
+ * Pipeline: RpcMessageDecoder → RpcMessageEncoder → ServerHeartbeatHandler → RpcServerHandler
+ */
 @Slf4j
-public class NettyRpcServer {
+public class TcpRpcServer {
 
     private final int port;
     private final Map<String, Object> serviceRegistry;
@@ -38,15 +31,15 @@ public class NettyRpcServer {
     private ThreadPoolExecutor businessExecutor;
     private Channel serverChannel;
 
-    public NettyRpcServer(int port, Map<String, Object> serviceRegistry, SerializeType serializeType) {
+    public TcpRpcServer(int port, Map<String, Object> serviceRegistry, SerializeType serializeType) {
         this(port, serviceRegistry, serializeType, false, false);
     }
 
-    public NettyRpcServer(int port,
-                          Map<String, Object> serviceRegistry,
-                          SerializeType serializeType,
-                          boolean authRequired,
-                          boolean sensitiveDataProcessing) {
+    public TcpRpcServer(int port,
+                        Map<String, Object> serviceRegistry,
+                        SerializeType serializeType,
+                        boolean authRequired,
+                        boolean sensitiveDataProcessing) {
         this.port = port;
         this.serviceRegistry = serviceRegistry;
         this.serializeType = serializeType;
@@ -54,9 +47,6 @@ public class NettyRpcServer {
         this.sensitiveDataProcessing = sensitiveDataProcessing;
     }
 
-    /**
-     * 供健康检查等组件监控业务队列积压，避免使用 CallerRunsPolicy 在 IO 线程执行业务逻辑。
-     */
     public ThreadPoolExecutor getBusinessExecutor() {
         return businessExecutor;
     }
@@ -81,17 +71,6 @@ public class NettyRpcServer {
                 },
                 new ThreadPoolExecutor.AbortPolicy());
 
-        SelfSignedCertificate ssc = new SelfSignedCertificate();
-        SslContext sslContext = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey())
-                .ciphers(Http2SecurityUtil.CIPHERS, SupportedCipherSuiteFilter.INSTANCE)
-                .applicationProtocolConfig(new ApplicationProtocolConfig(
-                        ApplicationProtocolConfig.Protocol.ALPN,
-                        ApplicationProtocolConfig.SelectorFailureBehavior.NO_ADVERTISE,
-                        ApplicationProtocolConfig.SelectedListenerFailureBehavior.ACCEPT,
-                        ApplicationProtocolNames.HTTP_2,
-                        ApplicationProtocolNames.HTTP_1_1))
-                .build();
-
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup)
                 .channel(NioServerSocketChannel.class)
@@ -104,41 +83,24 @@ public class NettyRpcServer {
                     @Override
                     protected void initChannel(SocketChannel ch) throws Exception {
                         ChannelPipeline pipeline = ch.pipeline();
-
-                        pipeline.addLast(sslContext.newHandler(ch.alloc()));
-
-                        Http2FrameCodecBuilder frameCodecBuilder = Http2FrameCodecBuilder.forServer();
-                        frameCodecBuilder.initialSettings(new Http2Settings()
-                                .maxConcurrentStreams(100)
-                                .initialWindowSize(1048576));
-                        pipeline.addLast(frameCodecBuilder.build());
-
-                        pipeline.addLast(new Http2MultiplexHandler(
-                                new ChannelInitializer<Channel>() {
-                                    @Override
-                                    protected void initChannel(Channel ch) {
-                                        ch.pipeline()
-                                                .addLast(new Http2StreamFrameToByteBufDecoder())
-                                                .addLast(new RpcMessageDecoder())
-                                                .addLast(new RpcMessageToHttp2FrameEncoder())
-                                                .addLast(new ServerHeartbeatHandler())
-                                                .addLast(new RpcServerHandler(
-                                                        serviceRegistry,
-                                                        businessExecutor,
-                                                        authRequired,
-                                                        sensitiveDataProcessing));
-                                    }
-                                }));
+                        pipeline.addLast(new RpcMessageDecoder());
+                        pipeline.addLast(new RpcMessageEncoder());
+                        pipeline.addLast(new ServerHeartbeatHandler());
+                        pipeline.addLast(new RpcServerHandler(
+                                serviceRegistry,
+                                businessExecutor,
+                                authRequired,
+                                sensitiveDataProcessing));
                     }
                 });
 
         ChannelFuture future = bootstrap.bind(port).sync();
         serverChannel = future.channel();
-        log.info("RPC 服务器已在端口启动 {}", port);
+        log.info("TCP RPC 服务器已在端口启动 {}", port);
     }
 
     public void shutdown() {
-        log.info("正在关闭 RPC 服务器...");
+        log.info("正在关闭 TCP RPC 服务器...");
         try {
             if (serverChannel != null) {
                 serverChannel.close().sync();
@@ -165,6 +127,6 @@ public class NettyRpcServer {
         if (workerGroup != null) {
             workerGroup.shutdownGracefully();
         }
-        log.info("RPC 服务器已关闭");
+        log.info("TCP RPC 服务器已关闭");
     }
 }

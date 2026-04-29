@@ -18,12 +18,17 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 
+/**
+ * RPC 服务端业务处理器
+ * 优化点：
+ * 1. 业务逻辑提交到独立线程池，不阻塞 IO 线程
+ * 2. 心跳响应在 IO 线程直接处理
+ * 3. 使用 RpcMessage 对象池减少 GC
+ */
 @Slf4j
 public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
 
-    // 服务实例注册表：接口名 -> 实现对象
     private final Map<String, Object> serviceRegistry;
-    // 业务线程池，避免阻塞IO线程
     private final ExecutorService businessExecutor;
     private final boolean authRequired;
     private final boolean sensitiveDataProcessing;
@@ -40,28 +45,38 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, RpcMessage msg) throws Exception {
-        // 心跳请求在IO线程中直接处理，轻量级操作
         if (msg.getMsgType() == MsgType.HEARTBEAT_REQ) {
-            RpcMessage heartbeatResp = RpcMessage.builder()
-                    .version(RpcConstant.VERSION)
-                    .msgType(MsgType.HEARTBEAT_RESP)
-                    .serializeType(msg.getSerializeType())
-                    .requestId(msg.getRequestId())
-                    .body(null)
-                    .build();
-            ctx.writeAndFlush(heartbeatResp);
+            RpcMessage heartbeatResp = RpcMessage.newInstance();
+            heartbeatResp.setVersion(RpcConstant.VERSION);
+            heartbeatResp.setMsgType(MsgType.HEARTBEAT_RESP);
+            heartbeatResp.setSerializeType(msg.getSerializeType());
+            heartbeatResp.setRequestId(msg.getRequestId());
+            heartbeatResp.setBody(null);
+            ctx.writeAndFlush(heartbeatResp).addListener(future -> {
+                if (!future.isSuccess()) {
+                    heartbeatResp.recycle();
+                }
+            });
+            msg.recycle();
             log.debug("已收到来自客户端的心跳，并已响应");
             return;
         }
 
         if (msg.getMsgType() == MsgType.REQUEST) {
             try {
-                businessExecutor.submit(() -> handleRequest(ctx, msg));
+                businessExecutor.submit(() -> {
+                    try {
+                        handleRequest(ctx, msg);
+                    } finally {
+                        msg.recycle();
+                    }
+                });
             } catch (RejectedExecutionException e) {
                 log.error("业务线程池已满，拒绝请求 requestId={}", msg.getRequestId(), e);
                 RpcResponse response = RpcResponse.fail(msg.getRequestId(),
                         new RpcException("服务器繁忙，请稍后重试", e));
                 sendResponse(ctx, msg.getRequestId(), msg.getSerializeType(), response);
+                msg.recycle();
             }
         }
     }
@@ -113,14 +128,17 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
     }
 
     private void sendResponse(ChannelHandlerContext ctx, long requestId, SerializeType serializeType, RpcResponse response) {
-        RpcMessage responseMsg = RpcMessage.builder()
-                .version(RpcConstant.VERSION)
-                .msgType(MsgType.RESPONSE)
-                .serializeType(serializeType)
-                .requestId(requestId)
-                .body(response)
-                .build();
-        ctx.writeAndFlush(responseMsg);
+        RpcMessage responseMsg = RpcMessage.newInstance();
+        responseMsg.setVersion(RpcConstant.VERSION);
+        responseMsg.setMsgType(MsgType.RESPONSE);
+        responseMsg.setSerializeType(serializeType);
+        responseMsg.setRequestId(requestId);
+        responseMsg.setBody(response);
+        ctx.writeAndFlush(responseMsg).addListener(future -> {
+            if (!future.isSuccess()) {
+                responseMsg.recycle();
+            }
+        });
     }
 
     @Override

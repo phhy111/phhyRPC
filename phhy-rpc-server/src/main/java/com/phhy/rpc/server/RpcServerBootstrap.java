@@ -73,11 +73,6 @@ public class RpcServerBootstrap {
     }
 
     public void start() throws Exception {
-        // 创建Nacos注册中心（如果未外部注入）
-        if (nacosRegistry == null) {
-            nacosRegistry = new com.phhy.rpc.registry.impl.NacosRegistry(nacosAddr);
-        }
-
         boolean authRequired = jwtSecret != null && !jwtSecret.isBlank();
         if (authRequired) {
             JwtUtils.configure(jwtSecret, jwtExpireMillis);
@@ -86,7 +81,12 @@ public class RpcServerBootstrap {
         nettyRpcServer = new NettyRpcServer(port, serviceRegistry, serializeType, authRequired, sensitiveDataProcessing);
         nettyRpcServer.start();
 
-        // 注册所有服务到Nacos
+        // 如果未注入注册中心，创建默认 Nacos 注册中心
+        if (nacosRegistry == null) {
+            nacosRegistry = new com.phhy.rpc.registry.impl.NacosRegistry(nacosAddr);
+        }
+
+        // 注册所有服务到注册中心
         String localHost = NetUtils.getLocalHost();
         for (String interfaceName : serviceRegistry.keySet()) {
             Map<String, String> metadata = new HashMap<>();

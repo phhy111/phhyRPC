@@ -17,20 +17,21 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * RPC 协议解码器
+ * 优化点：使用 RpcMessage 对象池（Recycler）减少 GC
+ */
 @Slf4j
 public class RpcMessageDecoder extends ByteToMessageDecoder {
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
-        // 检查协议头是否完整（至少需要 HEADER_LENGTH 字节）
         if (in.readableBytes() < RpcConstant.HEADER_LENGTH) {
             return;
         }
 
-        // 标记当前读索引，用于半包回退
         in.markReaderIndex();
 
-        // 读取并校验魔数
         byte[] magic = new byte[RpcConstant.MAGIC.length];
         in.readBytes(magic);
         if (!Arrays.equals(magic, RpcConstant.MAGIC)) {
@@ -38,37 +39,27 @@ public class RpcMessageDecoder extends ByteToMessageDecoder {
             throw new RpcException("无效的魔术数字： " + Arrays.toString(magic));
         }
 
-        // 读取版本号
         byte version = in.readByte();
-        // 读取消息类型
         byte msgTypeCode = in.readByte();
         MsgType msgType = MsgType.fromCode(msgTypeCode);
-        // 读取序列化类型
         byte serializeTypeCode = in.readByte();
         SerializeType serializeType = SerializeType.fromCode(serializeTypeCode);
-        // 读取请求ID
         long requestId = in.readLong();
-        // 读取消息体长度
         int bodyLen = in.readInt();
 
-        // 检查消息体是否完整
         if (in.readableBytes() < bodyLen) {
-            // 半包情况：重置读索引，等待更多数据到达
             in.resetReaderIndex();
             return;
         }
 
-        // 读取消息体
         byte[] bodyBytes = new byte[bodyLen];
         if (bodyLen > 0) {
             in.readBytes(bodyBytes);
         }
 
-        // 反序列化消息体
         Object body = null;
         if (bodyLen > 0) {
             Serializer serializer = SerializerFactory.getSerializer(serializeType);
-            // 根据消息类型决定反序列化的目标类
             if (msgType == MsgType.REQUEST) {
                 body = serializer.deserialize(bodyBytes, RpcRequest.class);
             } else if (msgType == MsgType.RESPONSE) {
@@ -76,14 +67,13 @@ public class RpcMessageDecoder extends ByteToMessageDecoder {
             }
         }
 
-        // 构造 RpcMessage
-        RpcMessage rpcMessage = RpcMessage.builder()
-                .version(version)
-                .msgType(msgType)
-                .serializeType(serializeType)
-                .requestId(requestId)
-                .body(body)
-                .build();
+        // 使用对象池获取 RpcMessage
+        RpcMessage rpcMessage = RpcMessage.newInstance();
+        rpcMessage.setVersion(version);
+        rpcMessage.setMsgType(msgType);
+        rpcMessage.setSerializeType(serializeType);
+        rpcMessage.setRequestId(requestId);
+        rpcMessage.setBody(body);
 
         out.add(rpcMessage);
 

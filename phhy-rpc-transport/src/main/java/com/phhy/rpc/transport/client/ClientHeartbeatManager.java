@@ -64,13 +64,12 @@ public class ClientHeartbeatManager {
                 );
 
                 if (channel != null && channel.isActive()) {
-                    RpcMessage heartbeatMsg = RpcMessage.builder()
-                            .version(RpcConstant.VERSION)
-                            .msgType(MsgType.HEARTBEAT_REQ)
-                            .serializeType(serializeType)
-                            .requestId(System.currentTimeMillis())
-                            .body(null)
-                            .build();
+                    RpcMessage heartbeatMsg = RpcMessage.newInstance();
+                    heartbeatMsg.setVersion(RpcConstant.VERSION);
+                    heartbeatMsg.setMsgType(MsgType.HEARTBEAT_REQ);
+                    heartbeatMsg.setSerializeType(serializeType);
+                    heartbeatMsg.setRequestId(System.currentTimeMillis());
+                    heartbeatMsg.setBody(null);
 
                     long sendTime = System.currentTimeMillis();
                     nettyRpcClient.createStreamBootstrap(channel).open()
